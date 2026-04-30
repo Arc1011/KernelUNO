@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <EEPROM.h>
 #include <string.h>
 #include <avr/pgmspace.h>
 
@@ -8,6 +9,16 @@
 #define PATH_LEN 16         
 #define DMESG_LINES 6
 #define DMESG_LEN 40
+
+// EEPROM Layout:
+// 0-759: File system storage (10 files * 76 bytes each = 760 bytes)
+// 800-955: Dmesg log (6 entries * 26 bytes each = 156 bytes)
+// Total used: ~916 bytes (Arduino UNO has 1024 bytes EEPROM)
+
+#define EEPROM_FS_START 0
+#define EEPROM_DMESG_START 800
+#define EEPROM_FILE_SIZE 76  // sizeof(RAMFile) with padding
+#define EEPROM_DMESG_SIZE 26 // sizeof(DmesgEntry) with padding
 
 typedef struct {
   char name[NAME_LEN];
@@ -37,12 +48,120 @@ int freeMemory() {
 
 void(* resetFunc) (void) = 0;
 
-// OPT from issue
+// ============================================================
+// EEPROM Helper Functions - CRITICAL FOR PERSISTENCE
+// ============================================================
+
+void saveFileToEEPROM(int index) {
+  if (index < 0 || index >= MAX_FILES) return;
+  
+  int addr = EEPROM_FS_START + (index * EEPROM_FILE_SIZE);
+  RAMFile* f = &fs[index];
+  
+  // Write struct fields sequentially
+  for (int i = 0; i < NAME_LEN; i++) {
+    EEPROM.write(addr++, f->name[i]);
+  }
+  for (int i = 0; i < CONTENT_LEN; i++) {
+    EEPROM.write(addr++, f->content[i]);
+  }
+  for (int i = 0; i < PATH_LEN; i++) {
+    EEPROM.write(addr++, f->parentDir[i]);
+  }
+  EEPROM.write(addr++, f->isDirectory ? 1 : 0);
+  EEPROM.write(addr++, f->active ? 1 : 0);
+}
+
+void loadFileFromEEPROM(int index) {
+  if (index < 0 || index >= MAX_FILES) return;
+  
+  int addr = EEPROM_FS_START + (index * EEPROM_FILE_SIZE);
+  RAMFile* f = &fs[index];
+  
+  // Read struct fields sequentially
+  for (int i = 0; i < NAME_LEN; i++) {
+    f->name[i] = EEPROM.read(addr++);
+  }
+  for (int i = 0; i < CONTENT_LEN; i++) {
+    f->content[i] = EEPROM.read(addr++);
+  }
+  for (int i = 0; i < PATH_LEN; i++) {
+    f->parentDir[i] = EEPROM.read(addr++);
+  }
+  f->isDirectory = EEPROM.read(addr++) ? 1 : 0;
+  f->active = EEPROM.read(addr++) ? 1 : 0;
+}
+
+void saveAllFilesToEEPROM() {
+  for (int i = 0; i < MAX_FILES; i++) {
+    saveFileToEEPROM(i);
+  }
+}
+
+void loadAllFilesFromEEPROM() {
+  for (int i = 0; i < MAX_FILES; i++) {
+    loadFileFromEEPROM(i);
+  }
+}
+
+void saveDmesgToEEPROM(int index) {
+  if (index < 0 || index >= DMESG_LINES) return;
+  
+  int addr = EEPROM_DMESG_START + (index * EEPROM_DMESG_SIZE);
+  DmesgEntry* d = &dmesg[index];
+  
+  // Write timestamp (4 bytes, little-endian)
+  EEPROM.write(addr++, (d->timestamp >> 0) & 0xFF);
+  EEPROM.write(addr++, (d->timestamp >> 8) & 0xFF);
+  EEPROM.write(addr++, (d->timestamp >> 16) & 0xFF);
+  EEPROM.write(addr++, (d->timestamp >> 24) & 0xFF);
+  
+  // Write message
+  for (int i = 0; i < DMESG_LEN; i++) {
+    EEPROM.write(addr++, d->message[i]);
+  }
+}
+
+void loadDmesgFromEEPROM(int index) {
+  if (index < 0 || index >= DMESG_LINES) return;
+  
+  int addr = EEPROM_DMESG_START + (index * EEPROM_DMESG_SIZE);
+  DmesgEntry* d = &dmesg[index];
+  
+  // Read timestamp (4 bytes, little-endian)
+  d->timestamp = EEPROM.read(addr++);
+  d->timestamp |= ((unsigned long)EEPROM.read(addr++)) << 8;
+  d->timestamp |= ((unsigned long)EEPROM.read(addr++)) << 16;
+  d->timestamp |= ((unsigned long)EEPROM.read(addr++)) << 24;
+  
+  // Read message
+  for (int i = 0; i < DMESG_LEN; i++) {
+    d->message[i] = EEPROM.read(addr++);
+  }
+}
+
+void saveAllDmesgToEEPROM() {
+  for (int i = 0; i < DMESG_LINES; i++) {
+    saveDmesgToEEPROM(i);
+  }
+}
+
+void loadAllDmesgFromEEPROM() {
+  for (int i = 0; i < DMESG_LINES; i++) {
+    loadDmesgFromEEPROM(i);
+  }
+}
+
+// ============================================================
+// DMESG Functions - SAVES TO EEPROM IMMEDIATELY
+// ============================================================
+
 void addDmesg(const __FlashStringHelper* msg) {
   if (dmesgIndex >= DMESG_LINES) dmesgIndex = 0;
   dmesg[dmesgIndex].timestamp = millis() / 1000;
   strncpy_P(dmesg[dmesgIndex].message, (PGM_P)msg, DMESG_LEN - 1);
   dmesg[dmesgIndex].message[DMESG_LEN - 1] = '\0';
+  saveDmesgToEEPROM(dmesgIndex);  // PERSIST TO EEPROM
   dmesgIndex++;
 }
 
@@ -51,48 +170,75 @@ void addDmesgRam(const char* msg) {
   dmesg[dmesgIndex].timestamp = millis() / 1000;
   strncpy(dmesg[dmesgIndex].message, msg, DMESG_LEN - 1);
   dmesg[dmesgIndex].message[DMESG_LEN - 1] = '\0';
+  saveDmesgToEEPROM(dmesgIndex);  // PERSIST TO EEPROM
   dmesgIndex++;
 }
+
+// ============================================================
+// Filesystem Initialization - LOADS FROM EEPROM ON STARTUP
+// ============================================================
 
 void initFS() {
   int d, i;
 
-  const char* dirs[] = {"home", "dev"};
-  for (d = 0; d < 2; d++) {
-    for (i = 0; i < MAX_FILES; i++) {
-      if (!fs[i].active) {
-        strncpy(fs[i].name, dirs[d], NAME_LEN - 1);
-        fs[i].name[NAME_LEN - 1] = '\0';
-        strncpy(fs[i].parentDir, "/", PATH_LEN - 1);
-        fs[i].parentDir[PATH_LEN - 1] = '\0';
-        fs[i].isDirectory = 1;
-        fs[i].active = 1;
-        break;
-      }
+  // Load existing filesystem from EEPROM
+  loadAllFilesFromEEPROM();
+  
+  // Check if filesystem was already initialized
+  int initialized = 0;
+  for (i = 0; i < MAX_FILES; i++) {
+    if (fs[i].active) {
+      initialized = 1;
+      break;
     }
   }
 
-  char devPath[PATH_LEN] = "/dev/";
-  const char* pins[] = {"pin2", "pin3", "pin4"};
-  for (d = 0; d < 3; d++) {
-    for (i = 0; i < MAX_FILES; i++) {
-      if (!fs[i].active) {
-        strncpy(fs[i].name, pins[d], NAME_LEN - 1);
-        fs[i].name[NAME_LEN - 1] = '\0';
-        strncpy(fs[i].parentDir, devPath, PATH_LEN - 1);
-        fs[i].parentDir[PATH_LEN - 1] = '\0';
-        fs[i].isDirectory = 0;
-        fs[i].content[0] = '\0';
-        fs[i].active = 1;
-        break;
+  if (!initialized) {
+    // First time init: create default directories
+    const char* dirs[] = {"home", "dev"};
+    for (d = 0; d < 2; d++) {
+      for (i = 0; i < MAX_FILES; i++) {
+        if (!fs[i].active) {
+          strncpy(fs[i].name, dirs[d], NAME_LEN - 1);
+          fs[i].name[NAME_LEN - 1] = '\0';
+          strncpy(fs[i].parentDir, "/", PATH_LEN - 1);
+          fs[i].parentDir[PATH_LEN - 1] = '\0';
+          fs[i].isDirectory = 1;
+          fs[i].active = 1;
+          saveFileToEEPROM(i);  // PERSIST TO EEPROM
+          break;
+        }
       }
     }
+
+    char devPath[PATH_LEN] = "/dev/";
+    const char* pins[] = {"pin2", "pin3", "pin4"};
+    for (d = 0; d < 3; d++) {
+      for (i = 0; i < MAX_FILES; i++) {
+        if (!fs[i].active) {
+          strncpy(fs[i].name, pins[d], NAME_LEN - 1);
+          fs[i].name[NAME_LEN - 1] = '\0';
+          strncpy(fs[i].parentDir, devPath, PATH_LEN - 1);
+          fs[i].parentDir[PATH_LEN - 1] = '\0';
+          fs[i].isDirectory = 0;
+          fs[i].content[0] = '\0';
+          fs[i].active = 1;
+          saveFileToEEPROM(i);  // PERSIST TO EEPROM
+          break;
+        }
+      }
+    }
+
+    addDmesg(F("Kernel initialized"));
+    addDmesg(F("Filesystem mounted"));
+    addDmesg(F("Ready for commands"));
+  } else {
+    // Filesystem restored from EEPROM
+    addDmesg(F("Restored from EEPROM"));
   }
 
-  // OPT from isse
-  addDmesg(F("Kernel initialized"));
-  addDmesg(F("Filesystem mounted"));
-  addDmesg(F("Ready for commands"));
+  // Load dmesg from EEPROM
+  loadAllDmesgFromEEPROM();
 }
 
 void printPrompt() {
@@ -105,7 +251,7 @@ void setup() {
   Serial.begin(115200);
   initFS();
   delay(1000);
-  Serial.println(F("\n--- KernelUNO v1.0 ---"));
+  Serial.println(F("\n--- KernelUNO v1.0 (EEPROM PERSISTENT) ---"));
   Serial.println(F("Type 'help' for commands"));
   printPrompt();
 }
@@ -122,7 +268,6 @@ void loop() {
         memset(inputBuffer, 0, 32);
         printPrompt();
       } else {
-        
         Serial.println();
         printPrompt();
       }
@@ -203,7 +348,6 @@ void executeCommand(char* line) {
 
   toLowercase(cmd);
 
-  // OPT
   if (strcmp_P(cmd, PSTR("pinmode")) == 0) {
     sp = indexOf(args, " ");
     if (sp == -1) { Serial.println(F("Usage: pinmode [pin] [in/out]")); return; }
@@ -327,6 +471,7 @@ void executeCommand(char* line) {
     fs[foundSlot].isDirectory = (strcmp_P(cmd, PSTR("mkdir")) == 0);
     fs[foundSlot].content[0] = '\0';
     fs[foundSlot].active = 1;
+    saveFileToEEPROM(foundSlot);  // *** PERSIST IMMEDIATELY ***
     Serial.println(F("OK."));
   }
   else if (strcmp_P(cmd, PSTR("cd")) == 0) {
@@ -371,6 +516,7 @@ void executeCommand(char* line) {
             strcmp(fs[j].parentDir, currentPath) == 0) {
           strncpy(fs[j].content, text, CONTENT_LEN - 1);
           fs[j].content[CONTENT_LEN - 1] = '\0';
+          saveFileToEEPROM(j);  // *** PERSIST IMMEDIATELY ***
           Serial.println(F("Saved."));
           if (strcmp_P(fs[j].parentDir, PSTR("/dev/")) == 0 && strncmp_P(fs[j].name, PSTR("pin"), 3) == 0) {
             int devPin = atoi_safe(fs[j].name + 3);
@@ -427,10 +573,12 @@ void executeCommand(char* line) {
           for (k = 0; k < MAX_FILES; k++) {
             if (fs[k].active && strncmp(fs[k].parentDir, dirPath, strlen(dirPath)) == 0) {
               fs[k].active = 0;
+              saveFileToEEPROM(k);  // *** PERSIST IMMEDIATELY ***
             }
           }
         }
         fs[j].active = 0;
+        saveFileToEEPROM(j);  // *** PERSIST IMMEDIATELY ***
         Serial.println(F("Removed."));
         found = 1;
         break;
@@ -470,7 +618,7 @@ void executeCommand(char* line) {
     Serial.println(F("root"));
   }
   else if (strcmp_P(cmd, PSTR("uname")) == 0) {
-    Serial.println(F("KernelUNO v1.0"));
+    Serial.println(F("KernelUNO v1.0 (with EEPROM)"));
     Serial.print(F("Kernel: Arduino "));
     Serial.println(F("AVR"));
     Serial.print(F("Hardware: "));
@@ -524,10 +672,33 @@ void executeCommand(char* line) {
     Serial.print(F("PWM pin ")); Serial.print(pin);
     Serial.print(F(" set to ")); Serial.println(pwmVal);
   }
+  else if (strcmp_P(cmd, PSTR("save")) == 0) {
+    // Explicitly save all data to EEPROM (redundant but available)
+    saveAllFilesToEEPROM();
+    saveAllDmesgToEEPROM();
+    Serial.println(F("All data saved to EEPROM."));
+    addDmesg(F("Manual save to EEPROM"));
+  }
+  else if (strcmp_P(cmd, PSTR("format")) == 0) {
+    // Clear all EEPROM data
+    for (int addr = EEPROM_FS_START; addr < EEPROM_DMESG_START + (DMESG_LINES * EEPROM_DMESG_SIZE); addr++) {
+      EEPROM.write(addr, 0);
+    }
+    // Clear RAM
+    for (int i = 0; i < MAX_FILES; i++) fs[i].active = 0;
+    for (int i = 0; i < DMESG_LINES; i++) dmesg[i].message[0] = '\0';
+    dmesgIndex = 0;
+    strncpy(currentPath, "/", PATH_LEN - 1);
+    currentPath[PATH_LEN - 1] = '\0';
+    Serial.println(F("EEPROM formatted. Rebooting..."));
+    delay(500);
+    resetFunc();
+  }
   else if (strcmp_P(cmd, PSTR("help")) == 0) {
     Serial.println(F("Commands: ls, cd, pwd, mkdir, touch, cat, echo, rm, info"));
     Serial.println(F("          pinmode, write, read, gpio, pwm, sh"));
     Serial.println(F("          uptime, uname, dmesg, df, free, whoami, clear, reboot"));
+    Serial.println(F("EEPROM:   save, format"));
     Serial.println(F("GPIO: gpio [pin] on/off/toggle  |  gpio vixa [count]"));
     Serial.println(F("SH:   sh [file]  -- run script (use ; as line separator)"));
   }
