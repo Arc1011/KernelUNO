@@ -8,6 +8,7 @@
 #define PATH_LEN 16         
 #define DMESG_LINES 6
 #define DMESG_LEN 40
+#define KernelUNO_VERSION "1.0.6"
 
 typedef struct {
   char name[NAME_LEN];
@@ -115,7 +116,7 @@ void setup() {
   Serial.begin(115200);
   initFS();
   delay(1000);
-  Serial.println(F("\n--- KernelUNO v1.0 ---"));
+  Serial.println(("\n--- KernelUNO v" KernelUNO_VERSION " ---"));
   Serial.println(F("Type 'help' for commands"));
   printPrompt();
 }
@@ -187,6 +188,17 @@ int safeConcatPath(char* dest, const char* add) {
   strncat(dest, add, PATH_LEN - destLen - 1);
   strncat(dest, "/", PATH_LEN - strlen(dest) - 1);
   return 1;
+}
+
+void uptime() {
+  unsigned long s = millis() / 1000;
+  unsigned long h = s / 3600;
+  unsigned long m = (s % 3600) / 60;
+  unsigned long sec = s % 60;
+
+  Serial.print(h); Serial.print(F("h "));
+  Serial.print(m); Serial.print(F("m "));
+  Serial.print(sec); Serial.println(F("s"));
 }
 
 void runScript(const char* content);
@@ -461,14 +473,8 @@ void executeCommand(char* line) {
     }
   }
   else if (strcmp_P(cmd, PSTR("uptime")) == 0) {
-    unsigned long s = millis() / 1000;
-    unsigned long h = s / 3600;
-    unsigned long m = (s % 3600) / 60;
-    unsigned long sec = s % 60;
     Serial.print(F("up "));
-    Serial.print(h); Serial.print(F("h "));
-    Serial.print(m); Serial.print(F("m "));
-    Serial.print(sec); Serial.println(F("s"));
+    uptime();
     addDmesg(F("uptime command"));
   }
   else if (strcmp_P(cmd, PSTR("df")) == 0 || strcmp_P(cmd, PSTR("free")) == 0) {
@@ -480,7 +486,7 @@ void executeCommand(char* line) {
     Serial.println(F("root"));
   }
   else if (strcmp_P(cmd, PSTR("uname")) == 0) {
-    Serial.println(F("KernelUNO v1.0"));
+    Serial.println(("KernelUNO v"KernelUNO_VERSION));
     Serial.print(F("Kernel: Arduino "));
     Serial.println(F("AVR"));
     Serial.print(F("Hardware: "));
@@ -615,6 +621,24 @@ void executeCommand(char* line) {
     Serial.println(F("          alias, slots, find"));
     Serial.println(F("GPIO: gpio [pin] on/off/toggle  |  gpio vixa [count]"));
     Serial.println(F("SH:   sh [file]  -- run script (use ; as line separator)"));
+  }
+  else if (strcmp_P(cmd, PSTR("neofetch")) == 0) {
+    Serial.println(F(""));
+    Serial.println(F(" _  __                    _ _    _ _   _  ____  "));
+    Serial.println(F("| |/ /                   | | |  | | \\ | |/ __ \\ "));
+    Serial.println(F("| ' / ___ _ __ _ __   ___| | |  | |  \\| | |  | |"));
+    Serial.println(F("|  < / _ \\ '__| '_ \\ / _ \\ | |  | | . ` | |  | |"));
+    Serial.println(F("| . \\  __/ |  | | | |  __/ | |__| | |\\  | |__| |"));
+    Serial.println(F("|_|\\_\\___|_|  |_| |_|\\___|_|\\____/|_| \\_|\\____/ "));
+    Serial.println(F(""));
+    Serial.println(F("KernelUNO v" KernelUNO_VERSION ""));
+    unsigned long s = millis() / 1000;
+    unsigned long h = s / 3600;
+    unsigned long m = (s % 3600) / 60;
+    unsigned long sec = s % 60;
+    Serial.print(F("Uptime: "));
+    uptime();
+    Serial.print(F("Free RAM: ")); Serial.print(freeMemory()); Serial.println(F(" bytes"));  
   }
   else {
     // check alias
