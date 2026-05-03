@@ -33,6 +33,7 @@ A Unix-like shell and RAM filesystem for Arduino UNO R3. Write files, control GP
 - `find`
 - `alias`
 - `slots`
+- `neofetch`
 
 ## How It Works
 
@@ -52,9 +53,7 @@ Input is buffered from the serial connection and parsed line-by-line. Commands a
 - EEPROM support
 - I2C interface
 - Date cmd
-- neofetch cmd
 
 ## License
 
 BSD3 - Original by [Arc1011](https://github.com/Arc1011/KernelUNO)
-
