@@ -8,6 +8,7 @@
 #define PATH_LEN 16         
 #define DMESG_LINES 6
 #define DMESG_LEN 40
+#define NO_SOFT_RESET 0 // Set NO_SOFT_RESET to 1 for boards that encounter errors when running the reboot command
 
 typedef struct {
   char name[NAME_LEN];
@@ -45,7 +46,25 @@ int freeMemory() {
   return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
 }
 
-void(* resetFunc) (void) = 0;
+#if defined(__AVR__) && NO_SOFT_RESET == 0
+void (*resetFunc)(void) = 0;
+
+#elif defined(__arm__) && NO_SOFT_RESET == 0
+void resetFunc() {
+  NVIC_SystemReset();
+}
+
+#elif NO_SOFT_RESET != 0
+void resetFunc() {
+  Serial.println(F("This build of KernelUNO has been configured to disable software resets."));
+}
+
+#else
+void resetFunc() {
+  Serial.println(F("KernelUNO doesn't support software resets on this hardware."));
+}
+
+#endif
 
 // OPT from issue
 void addDmesg(const __FlashStringHelper* msg) {
