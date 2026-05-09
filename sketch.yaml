@@ -1,0 +1,2 @@
+default_fqbn: arduino:avr:uno
+default_port: /dev/ttyACM3

@@ -1,20 +1,24 @@
 #include <Arduino.h>
 #include <string.h>
-#include <avr/pgmspace.h>
+#include <EEPROM.h>
+//#include <avr/pgmspace.h>
 
-#define MAX_FILES 10         
+#define MAX_FILES 10    
 #define NAME_LEN 12         
 #define CONTENT_LEN 32      
 #define PATH_LEN 16         
 #define DMESG_LINES 6
 #define DMESG_LEN 40
+#define MAX_SAVED_FILES 2
+
+int facreboot = 0; // When 1, the eeprom will reset on the "reboot" command
 
 typedef struct {
   char name[NAME_LEN];
   char content[CONTENT_LEN];
   char parentDir[PATH_LEN];
-  int isDirectory;
-  int active;
+  uint8_t isDirectory;
+  uint8_t active;
 } RAMFile;
 
 typedef struct {
@@ -22,6 +26,7 @@ typedef struct {
   char message[DMESG_LEN];
 } DmesgEntry;
 
+RAMFile savedfs[MAX_SAVED_FILES];
 RAMFile fs[MAX_FILES];
 char currentPath[PATH_LEN] = "/";
 char inputBuffer[32] = "";
@@ -35,7 +40,7 @@ int dmesgIndex = 0;
 typedef struct {
   char name[ALIAS_NAME_LEN];
   char value[ALIAS_VAL_LEN];
-  int active;
+  uint8_t active;
 } AliasEntry;
 AliasEntry aliases[MAX_ALIASES];
 
@@ -62,6 +67,10 @@ void addDmesgRam(const char* msg) {
   strncpy(dmesg[dmesgIndex].message, msg, DMESG_LEN - 1);
   dmesg[dmesgIndex].message[DMESG_LEN - 1] = '\0';
   dmesgIndex++;
+}
+
+void initSavedFS() {
+  EEPROM.get(0, savedfs);
 }
 
 void initFS() {
@@ -114,6 +123,7 @@ void printPrompt() {
 void setup() {
   Serial.begin(115200);
   initFS();
+  initSavedFS();
   delay(1000);
   Serial.println(F("\n--- KernelUNO v1.0 ---"));
   Serial.println(F("Type 'help' for commands"));
@@ -493,6 +503,13 @@ void executeCommand(char* line) {
     Serial.println(F("Rebooting..."));
     addDmesg(F("System reboot"));
     delay(500);
+
+    if (facreboot == 1){
+      for (int i = 0 ; i < EEPROM.length() ; i++) {
+        EEPROM.write(i, 0);
+      }
+    }
+
     resetFunc();
   }
   else if (strcmp_P(cmd, PSTR("clear")) == 0) {
@@ -612,10 +629,79 @@ void executeCommand(char* line) {
     Serial.println(F("Commands: ls, cd, pwd, mkdir, touch, cat, echo, rm, info"));
     Serial.println(F("          pinmode, write, read, gpio, pwm, sh"));
     Serial.println(F("          uptime, uname, dmesg, df, free, whoami, clear, reboot"));
-    Serial.println(F("          alias, slots, find"));
+    Serial.println(F("          alias, slots, find, facreboot, savefile, readfile"));
     Serial.println(F("GPIO: gpio [pin] on/off/toggle  |  gpio vixa [count]"));
     Serial.println(F("SH:   sh [file]  -- run script (use ; as line separator)"));
   }
+
+  else if (strcmp_P(cmd, PSTR("facreboot")) == 0) {
+    if(facreboot == 0){
+      Serial.println("The next reboot command will now clear the eeprom, if you do not want this retype the command");
+      facreboot = 1;
+    }
+    else if (facreboot == 1) {
+      Serial.println("Factory reboot disabled");
+      facreboot = 0;
+    }
+  }
+
+  else if (strcmp_P(cmd, PSTR("savefile")) == 0) {
+
+    sp = indexOf(args, " ");
+    if (sp == -1) {
+      Serial.println(F("Usage: savefile [eeprom index] [file name]"));
+      Serial.println(F("eeprom index falls back to 0 if not a number"));
+      Serial.println(F("file name must be a file"));
+      return;
+    }
+
+    EEPROM.get(0, savedfs);
+
+    char indexStr[2] = "";
+    strncpy(indexStr, args, sp);
+    indexStr[sp] = '\0';
+    char fileName[NAME_LEN] = "";
+    strncpy(fileName, args + sp + 1, NAME_LEN - 1);
+    fileName[NAME_LEN - 1] = '\0';
+    toLowercase(fileName);
+
+    short eepromIndex = atoi_safe(indexStr);
+    short fileIndex;
+
+    int j, found = 0;
+    for (j = 0; j < MAX_FILES; j++) {
+      if (fs[j].active && !fs[j].isDirectory &&
+          strcmp(fileName, fs[j].name) == 0 &&
+          strcmp(fs[j].parentDir, currentPath) == 0) {
+        fileIndex = j;
+        found = 1;
+        break;
+      }
+    }
+    if (found == 1) {
+      savedfs[eepromIndex] = fs[fileIndex];
+      savedfs[eepromIndex].parentDir == '/';
+
+      EEPROM.put(0, savedfs);
+    }
+     
+  }
+
+  else if (strcmp_P(cmd, PSTR("readfile")) == 0) {
+    int foundSlot = -1, j;
+    for (j = 0; j < MAX_FILES; j++) {
+      if (!fs[j].active) { foundSlot = j; break; }
+    }
+    if (foundSlot == -1) { Serial.println(F("No space.")); return; }
+
+    short eepromIndex = atoi_safe(args);
+
+    EEPROM.get(0, savedfs);
+    strcpy(savedfs[eepromIndex].parentDir, currentPath);
+    fs[foundSlot] = savedfs[eepromIndex];
+  }
+
+
   else {
     // check alias
     int j, resolved = 0;
