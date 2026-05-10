@@ -13,8 +13,8 @@ typedef struct {
   char name[NAME_LEN];
   char content[CONTENT_LEN];
   char parentDir[PATH_LEN];
-  int isDirectory;
-  int active;
+  uint8_t isDirectory;
+  uint8_t active;
 } RAMFile;
 
 typedef struct {
@@ -35,7 +35,7 @@ int dmesgIndex = 0;
 typedef struct {
   char name[ALIAS_NAME_LEN];
   char value[ALIAS_VAL_LEN];
-  int active;
+  uint8_t active;
 } AliasEntry;
 AliasEntry aliases[MAX_ALIASES];
 
