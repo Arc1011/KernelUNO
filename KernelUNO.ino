@@ -637,6 +637,7 @@ void executeCommand(char* line) {
   else if (strcmp_P(cmd, PSTR("facreboot")) == 0) {
     if(facreboot == 0){
       Serial.println("The next reboot command will now clear the eeprom, if you do not want this retype the command");
+      Serial.println("Warning: This can wear out the EEPROM, do not overuse this reboot");
       facreboot = 1;
     }
     else if (facreboot == 1) {
