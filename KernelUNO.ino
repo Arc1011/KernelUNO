@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <string.h>
 #include <EEPROM.h>
-//#include <avr/pgmspace.h>
+#include <avr/pgmspace.h>
 
 #define MAX_FILES 10    
 #define NAME_LEN 12         
