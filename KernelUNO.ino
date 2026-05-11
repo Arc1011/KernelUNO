@@ -37,6 +37,16 @@ int inputLen = 0;
 DmesgEntry dmesg[DMESG_LINES];
 int dmesgIndex = 0;
 
+#define MAX_ALIASES 4
+#define ALIAS_NAME_LEN 6
+#define ALIAS_VAL_LEN 20
+typedef struct {
+  char name[ALIAS_NAME_LEN];
+  char value[ALIAS_VAL_LEN];
+  int active;
+} AliasEntry;
+AliasEntry aliases[MAX_ALIASES];
+
 int freeMemory() {
   char top;
 
@@ -538,14 +548,107 @@ void executeCommand(char* line) {
     Serial.print(F("PWM pin ")); Serial.print(pin);
     Serial.print(F(" set to ")); Serial.println(pwmVal);
   }
+  else if (strcmp_P(cmd, PSTR("alias")) == 0) {
+    if (args[0] == '\0') {
+      int j, any = 0;
+      for (j = 0; j < MAX_ALIASES; j++) {
+        if (aliases[j].active) {
+          Serial.print(aliases[j].name);
+          Serial.print(F("='"));
+          Serial.print(aliases[j].value);
+          Serial.println(F("'"));
+          any = 1;
+        }
+      }
+      if (!any) Serial.println(F("No aliases."));
+    } else {
+      int eq = indexOf(args, "=");
+      if (eq == -1) {
+        // show single alias
+        int j, found = 0;
+        for (j = 0; j < MAX_ALIASES; j++) {
+          if (aliases[j].active && strcmp(aliases[j].name, args) == 0) {
+            Serial.print(args); Serial.print(F("='")); Serial.print(aliases[j].value); Serial.println(F("'"));
+            found = 1; break;
+          }
+        }
+        if (!found) Serial.println(F("No such alias."));
+      } else {
+        char aname[ALIAS_NAME_LEN] = "";
+        char aval[ALIAS_VAL_LEN] = "";
+        strncpy(aname, args, eq < ALIAS_NAME_LEN ? eq : ALIAS_NAME_LEN - 1);
+        aname[ALIAS_NAME_LEN - 1] = '\0';
+        strncpy(aval, args + eq + 1, ALIAS_VAL_LEN - 1);
+        aval[ALIAS_VAL_LEN - 1] = '\0';
+        int j, slot = -1;
+        for (j = 0; j < MAX_ALIASES; j++) {
+          if (aliases[j].active && strcmp(aliases[j].name, aname) == 0) { slot = j; break; }
+        }
+        if (slot == -1) {
+          for (j = 0; j < MAX_ALIASES; j++) {
+            if (!aliases[j].active) { slot = j; break; }
+          }
+        }
+        if (slot == -1) { Serial.println(F("Alias table full.")); return; }
+        strncpy(aliases[slot].name, aname, ALIAS_NAME_LEN - 1);
+        aliases[slot].name[ALIAS_NAME_LEN - 1] = '\0';
+        strncpy(aliases[slot].value, aval, ALIAS_VAL_LEN - 1);
+        aliases[slot].value[ALIAS_VAL_LEN - 1] = '\0';
+        aliases[slot].active = 1;
+        Serial.println(F("Alias set."));
+      }
+    }
+  }
+  else if (strcmp_P(cmd, PSTR("slots")) == 0) {
+    int used = 0, j;
+    for (j = 0; j < MAX_FILES; j++) {
+      if (fs[j].active) used++;
+    }
+    Serial.print(F("("));
+    Serial.print(used);
+    Serial.print(F("/"));
+    Serial.print(MAX_FILES);
+    Serial.println(F(")"));
+  }
+  else if (strcmp_P(cmd, PSTR("find")) == 0) {
+    if (args[0] == '\0') { Serial.println(F("Usage: find [name]")); return; }
+    int j, found = 0;
+    for (j = 0; j < MAX_FILES; j++) {
+      if (fs[j].active && strcmp(fs[j].name, args) == 0) {
+        Serial.print(fs[j].parentDir);
+        Serial.println(fs[j].name);
+        found = 1;
+      }
+    }
+    if (!found) Serial.println(F("Not found."));
+  }
   else if (strcmp_P(cmd, PSTR("help")) == 0) {
     Serial.println(F("Commands: ls, cd, pwd, mkdir, touch, cat, echo, rm, info"));
     Serial.println(F("          pinmode, write, read, gpio, pwm, sh"));
     Serial.println(F("          uptime, uname, dmesg, df, free, whoami, clear, reboot"));
+    Serial.println(F("          alias, slots, find"));
     Serial.println(F("GPIO: gpio [pin] on/off/toggle  |  gpio vixa [count]"));
     Serial.println(F("SH:   sh [file]  -- run script (use ; as line separator)"));
-  } else {
-    Serial.println(F("Unknown command."));
+  }
+  else {
+    // check alias
+    int j, resolved = 0;
+    for (j = 0; j < MAX_ALIASES; j++) {
+      if (aliases[j].active && strcmp(aliases[j].name, cmd) == 0) {
+        char aliasLine[32] = "";
+        strncpy(aliasLine, aliases[j].value, 31);
+        aliasLine[31] = '\0';
+        if (args[0] != '\0') {
+          int al = strlen(aliasLine);
+          if (al < 30) { aliasLine[al] = ' '; aliasLine[al+1] = '\0'; }
+          strncat(aliasLine, args, 31 - strlen(aliasLine));
+        }
+        executeCommand(aliasLine);
+        resolved = 1;
+        break;
+      }
+    }
+    if (!resolved) Serial.println(F("Unknown command."));
   }
 }
 

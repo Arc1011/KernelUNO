@@ -1,18 +1,14 @@
-# KernelUNO v1.0 - a Ram filesystem emulator and simple shell for your arduino UNO R3 
+# KernelUNO v1.0
 
-# Features
+A Unix-like shell and RAM filesystem for Arduino UNO R3. Write files, control GPIO pins, read sensors, and run simple scripts all from the serial terminal.
 
-- Unix-like Shell with 24 commands
-
-- GPIO support
-
-<img width="769" height="634" alt="1" src="https://github.com/user-attachments/assets/5d9940bc-8b05-48c4-92f6-c0d2b9dccbed" />
+<img width="769" height="659" alt="554" src="https://github.com/user-attachments/assets/82aa5f0c-bf22-4f83-865a-ba3b4258011e" />
 
 
-# Commands
-- `uname`
-- `cd`
+# Commands (26):
+
 - `ls`
+- `cd`
 - `pwd`
 - `mkdir`
 - `touch`
@@ -24,24 +20,41 @@
 - `write`
 - `read`
 - `gpio`
+- `pwm`
 - `sh`
 - `uptime`
+- `uname`
 - `dmesg`
 - `df`
 - `free`
 - `whoami`
 - `clear`
 - `reboot`
-- `pwm`
+- `find`
+- `alias`
+- `slots`
 
-# TODO
+## How It Works
 
-- [ ] eeprom
-- [ ] i2c
-- [ ] pwm (done)
-- [ ] date cmd
+The code manages a virtual filesystem stored in RAM:
+- Maximum 10 files/directories
+- Max 32 bytes per file content
+- 12 character names
+- Automatic `/home` and `/dev` directories created on boot
+- `/dev/pin2`, `/dev/pin3`, `/dev/pin4` are special files for GPIO
 
-# LICENSE
+GPIO control uses standard Arduino functions: `pinMode()`, `digitalWrite()`, `digitalRead()`, and `analogWrite()`.
 
-BSD3 ([Arc1011](https://github.com/Arc1011/KernelUNO))
+Input is buffered from the serial connection and parsed line-by-line. Commands are case-insensitive.
+
+## Planned Features
+
+- EEPROM support
+- I2C interface
+- Date cmd
+- neofetch cmd
+
+## License
+
+BSD3 - Original by [Arc1011](https://github.com/Arc1011/KernelUNO)
 
